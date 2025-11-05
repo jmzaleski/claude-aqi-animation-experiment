@@ -259,7 +259,8 @@ def main():
     
     # Create output directory
     #output_dir = "/mnt/user-data/outputs/purpleair_frames"
-    output_dir = "/tmp/purpleair_frames" #matz
+    DIR="/tmp"
+    output_dir = DIR + "/purpleair_frames" #matz
     os.makedirs(output_dir, exist_ok=True)
     
     # For the simplified version, let's just create frames using current data
@@ -306,7 +307,7 @@ def main():
         images.append(Image.open(frame_path))
     
     #animation_path = "/mnt/user-data/outputs/aqi_animation.gif"
-    animation_path = "/tmp/aqi_animation.gif" #matz
+    animation_path =  DIR + "/aqi_animation.gif" #matz
     images[0].save(
         animation_path,
         save_all=True,
@@ -318,7 +319,7 @@ def main():
     
     # Also create a sample CSV with the current data
     #csv_path = "/mnt/user-data/outputs/sensors_current.csv"
-    csv_path = "/tmp/sensors_current.csv" #matz
+    csv_path =  DIR + "/sensors_current.csv" #matz
     sensors['aqi'] = sensors['pm2.5'].apply(
         lambda x: calculate_aqi(x)[0] if pd.notna(x) else None
     )
