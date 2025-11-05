@@ -140,7 +140,7 @@ def get_sensor_history(api_key, sensor_index, start_time, end_time, average=60):
         return pd.DataFrame()
 
 
-def create_hourly_frames(sensors_df, historical_data, output_dir, bbox, hours_interval=1):
+def create_hourly_frames(sensors_df, historical_data, output_dir, bbox, hours_interval=1, dpi=100):
     """
     Create visualization frames for each hour.
     
@@ -293,26 +293,53 @@ def create_hourly_frames(sensors_df, historical_data, output_dir, bbox, hours_in
         plt.tight_layout()
         
         frame_path = os.path.join(output_dir, f"frame_{frame_num:04d}.png")
-        plt.savefig(frame_path, dpi=150, bbox_inches='tight')
-        plt.close()
+        plt.savefig(frame_path, dpi=dpi, bbox_inches='tight')
+        plt.close(fig)  # Explicitly close the figure
+        plt.clf()  # Clear the current figure
+        plt.cla()  # Clear the current axes
         
         frame_paths.append(frame_path)
         
         if (frame_num + 1) % 10 == 0:
             print(f"  Created {frame_num + 1}/{len(frame_times)} frames")
+            # Force garbage collection periodically
+            import gc
+            gc.collect()
     
     print(f"Completed all {len(frame_paths)} frames")
     return frame_paths
 
 
 def create_animation(frame_paths, output_path, fps=4):
-    """Create GIF animation from frames."""
+    """Create GIF animation from frames (memory-efficient for large sets)."""
     print(f"\nCreating animation: {output_path}")
     
-    images = []
-    for path in frame_paths:
-        images.append(Image.open(path))
+    # For large frame sets, skip GIF creation (too memory intensive)
+    if len(frame_paths) > 100:
+        print(f"⚠ Large animation ({len(frame_paths)} frames)")
+        print(f"  Skipping GIF creation to avoid memory issues.")
+        print(f"\nCreate animation with external tools:")
+        print(f"  ffmpeg -framerate {fps} -pattern_type glob -i 'purpleair_frames/frame_*.png' \\")
+        print(f"         -c:v libx264 -pix_fmt yuv420p aqi_animation.mp4")
+        print(f"\n  Or for GIF:")
+        print(f"  ffmpeg -framerate {fps} -pattern_type glob -i 'purpleair_frames/frame_*.png' \\")
+        print(f"         -vf 'scale=800:-1' aqi_animation.gif")
+        return
     
+    # For smaller sets, create GIF in batches
+    print(f"Loading {len(frame_paths)} frames...")
+    images = []
+    
+    for i, path in enumerate(frame_paths):
+        if i % 20 == 0:
+            print(f"  Loading frame {i+1}/{len(frame_paths)}...")
+        img = Image.open(path)
+        # Reduce size if needed
+        if img.size[0] > 1000:
+            img = img.resize((1000, int(1000 * img.size[1] / img.size[0])), Image.Resampling.LANCZOS)
+        images.append(img)
+    
+    print("Saving GIF...")
     images[0].save(
         output_path,
         save_all=True,
@@ -329,6 +356,8 @@ def main():
     parser.add_argument('--days', type=int, default=7, help='Number of days of history (default: 7)')
     parser.add_argument('--hours-interval', type=int, default=1, help='Hours between frames (default: 1)')
     parser.add_argument('--fps', type=int, default=4, help='Frames per second in output (default: 4)')
+    parser.add_argument('--dpi', type=int, default=100, help='Image DPI/resolution (default: 100, lower=less memory)')
+    parser.add_argument('--skip-gif', action='store_true', help='Skip GIF creation (just make frames)')
     args = parser.parse_args()
     
     api_key = os.environ.get('PURPLEAIR_API_KEY')
@@ -338,16 +367,23 @@ def main():
         sys.exit(1)
     
     # Vancouver/Surrey bounding box
-    BBOX = (49.35, -123.25, 49.00, -122.75)
+    # BBOX = (49.35, -123.25, 49.00, -122.75)
+    # Golden'ish bounding box
+    # NW corner: (51.3061, -116.97414)
+    # SE corner: (51.0, -116.0)
+    BBOX = (51.3, -117.0, 51.0, -116.0)
     
     print("=" * 80)
     print("PurpleAir Historical AQI Animation Generator")
     print("=" * 80)
     print(f"\nConfiguration:")
-    print(f"  Region: Vancouver/Surrey, BC")
+#    print(f"  Region: Vancouver/Surrey, BC")
+    print(f"  Region: Golden, BC")
     print(f"  Bounding box: NW({BBOX[0]}, {BBOX[1]}) to SE({BBOX[2]}, {BBOX[3]})")
     print(f"  History: {args.days} days")
     print(f"  Frame interval: {args.hours_interval} hour(s)")
+    print(f"  Image DPI: {args.dpi} (lower = less memory)")
+    print(f"  Skip GIF: {args.skip_gif}")
     print()
     
     # Time range
@@ -384,31 +420,45 @@ def main():
         
         # Rate limiting - be nice to the API
         time.sleep(0.5)
+        
+        # Clean up memory every 10 sensors
+        if (idx + 1) % 10 == 0:
+            import gc
+            gc.collect()
     
     print()
     print(f"Successfully retrieved data for {len(historical_data)}/{len(sensors_df)} sensors")
     print()
     
     # Create frames
-    output_dir = "/mnt/user-data/outputs/purpleair_frames"
+    DIR = "/tmp"
+    output_dir = DIR + "/purpleair_frames"
     frame_paths = create_hourly_frames(
         sensors_df,
         historical_data,
         output_dir,
         BBOX,
-        args.hours_interval
+        args.hours_interval,
+        args.dpi
     )
     
     if not frame_paths:
         print("No frames created!")
         sys.exit(1)
     
-    # Create animation
-    animation_path = "/mnt/user-data/outputs/purpleair_aqi_animation.gif"
-    create_animation(frame_paths, animation_path, fps=args.fps)
+    # Create animation (unless skipped)
+    if not args.skip_gif:
+        animation_path = DIR + "/purpleair_aqi_animation.gif"
+        create_animation(frame_paths, animation_path, fps=args.fps)
+    else:
+        print("\nSkipped GIF creation (--skip-gif flag)")
+        print(f"Frames saved to: {output_dir}")
+        print("\nCreate animation manually with:")
+        print(f"  ffmpeg -framerate {args.fps} -pattern_type glob -i '{output_dir}/frame_*.png' \\")
+        print(f"         -c:v libx264 -pix_fmt yuv420p aqi_animation.mp4")
     
     # Save data summary
-    summary_path = "/mnt/user-data/outputs/data_summary.txt"
+    summary_path =  DIR + "/outputs/data_summary.txt"
     with open(summary_path, 'w') as f:
         f.write(f"PurpleAir AQI Animation Data Summary\n")
         f.write(f"=" * 50 + "\n\n")
