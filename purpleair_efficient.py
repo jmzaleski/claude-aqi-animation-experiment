@@ -25,7 +25,7 @@ import matplotlib.pyplot as plt
 import matplotlib.patches as mpatches
 import time
 import gc
-
+from PIL import Image
 
 # AQI calculation
 AQI_BREAKPOINTS = [
@@ -158,8 +158,7 @@ def load_data(csv_file):
     print(f"  Loaded {len(df)} data points")
     return df
 
-
-def create_single_frame(sensors_df, historical_df, target_time, bbox, output_path, dpi=100):
+def create_single_frame(sensors_df, historical_df, target_time, bbox, region_title, output_path, dpi=100, background_image=None):
     """Create one PNG frame. Clean up properly."""
     
     # Get data for this time (within 30 min window)
@@ -186,7 +185,22 @@ def create_single_frame(sensors_df, historical_df, target_time, bbox, output_pat
     # Create plot
     fig = plt.figure(figsize=(14, 11))
     ax = fig.add_subplot(111)
-    
+
+    #render in background image
+    if background_image is not None:
+        try:
+            from PIL import Image
+            bg_img = Image.open(background_image)
+            bg_array = np.array(bg_img)
+            nwlat, nwlng, selat, selng = bbox
+            ax.imshow(bg_array,
+                 extent=[nwlng, selng, selat, nwlat],
+                 aspect='auto',
+                 zorder=0,
+                 alpha=1.0)
+        except Exception as e:
+            print(f"    Warning: Could not load background image: {e}")
+        
     # Plot sensors
     for _, row in frame_data.iterrows():
         ax.scatter(row['longitude'], row['latitude'], 
@@ -211,8 +225,8 @@ def create_single_frame(sensors_df, historical_df, target_time, bbox, output_pat
     time_str = target_time.strftime("%A, %B %d, %Y - %H:%M")
 #    ax.set_title(f'Air Quality Index (AQI) - Vancouver/Surrey Region\n{time_str}',
 #                fontsize=15, fontweight='bold', pad=20)
-    title=f'Air Quality Index (AQI) - ' + REGION_TITLE #matz
-    print("make animation with title", title)
+    title=f'Air Quality Index (AQI) -  {region_title}\n{time_str}' #matz
+    print("make frame with title", title)
     ax.set_title(title, fontsize=15, fontweight='bold', pad=20)
     
     ax.grid(True, alpha=0.3, linestyle='--')
@@ -255,6 +269,8 @@ def main():
     parser.add_argument('--hours-interval', type=int, default=1, help='Hours between frames')
     parser.add_argument('--dpi', type=int, default=100, help='Image resolution')
     parser.add_argument('--use-cached', action='store_true', help='Use existing CSV data')
+    parser.add_argument('--background-image', type=str, default=None,
+                    help='Path to georeferenced background image (PNG/JPG) matching bounding box')
     args = parser.parse_args()
     
     api_key = os.environ.get('PURPLEAIR_API_KEY')
@@ -271,8 +287,8 @@ def main():
     # Golden'ish bounding box
     # NW corner: (51.3061, -116.97414)
     # SE corner: (51.0, -116.0)
-    BBOX = (51.5, -117.5, 51.0, -116.0)
-    REGION_TITLE = f'Golden Region\n{time_str}'
+    BBOX = (51.5, -117.5, 51.0, -116.25)
+    REGION_TITLE = f'Golden Region'
     
     print("=" * 80)
     print("PurpleAir AQI Animation - Efficient Version")
@@ -334,7 +350,7 @@ def main():
     for i, target_time in enumerate(frame_times):
         frame_path = os.path.join(frames_dir, f"frame_{i:04d}.png")
         
-        if create_single_frame(sensors_df, historical_df, target_time, BBOX, frame_path, args.dpi):
+        if create_single_frame(sensors_df, historical_df, target_time, BBOX, REGION_TITLE, frame_path, args.dpi, args.background_image):        
             success_count += 1
             print(f"  [{i+1}/{len(frame_times)}] ✓ {target_time.strftime('%Y-%m-%d %H:%M')}")
         else:
